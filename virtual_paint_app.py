@@ -2,6 +2,22 @@ import mediapipe as mp
 import cv2
 import numpy as np
 import time
+import matplotlib.pyplot as plt
+
+#Para seleccionar y subir una imagen
+import tkinter as tk
+from tkinter import filedialog
+
+# Variable para almacenar la imagen seleccionada y sus coordenadas iniciales
+selected_img = None
+img_coords = [0, 0]
+img_scale = 0.7  # Escala inicial de la imagen
+img_add = False
+roi_img = 0
+alto = 0
+ancho = 0
+bgr_icon_img = 0
+alpha_channel_img = 0
 
 #contants
 ml = 150
@@ -36,16 +52,14 @@ def index_raised(yi, y9):
 
 	return False
 
-
-
 hands = mp.solutions.hands
 hand_landmark = hands.Hands(min_detection_confidence=0.6, min_tracking_confidence=0.6, max_num_hands=1)
 draw = mp.solutions.drawing_utils
 
-
 # drawing tools
 tools = cv2.imread("tools.png")
 tools = tools.astype('uint8')
+#print(tools)
 
 mask = np.ones((480, 640))*255
 mask = mask.astype('uint8')
@@ -57,22 +71,53 @@ cv2.line(tools, (100,0), (100,50), (0,0,255), 2)
 cv2.line(tools, (150,0), (150,50), (0,0,255), 2)
 cv2.line(tools, (200,0), (200,50), (0,0,255), 2)
 '''
+# Cargar el icono para añadir imágenes png negras
+
+icon_add_img = cv2.imread("add_imagen.png", cv2.IMREAD_UNCHANGED)
+if icon_add_img.shape[-1] == 4:  # Verificar si tiene 4 canales (RGBA)
+    icon_add_img = cv2.cvtColor(icon_add_img, cv2.COLOR_BGRA2RGBA)
+# Separar los canales de la imagen
+bgr_icon = icon_add_img[:, :, :3]  # Canales RGB
+alpha_channel = icon_add_img[:, :, 3] / 255.0  # Canal alfa normalizado a [0, 1]
+
+# Cargar el icono para borrar la imagen
+icon_delete_img = cv2.imread("delete_imagen.png")
+icon_delete_img = icon_delete_img.astype('uint8')
+
+# Coordenadas para el icono
+icon_x, icon_y = 10, 10
 
 cap = cv2.VideoCapture(0)
 while True:
 	_, frm = cap.read()
 	frm = cv2.flip(frm, 1)
-
+    
 	rgb = cv2.cvtColor(frm, cv2.COLOR_BGR2RGB)
-
+    
 	op = hand_landmark.process(rgb)
-
+	
 	if op.multi_hand_landmarks:
 		for i in op.multi_hand_landmarks:
 			draw.draw_landmarks(frm, i, hands.HAND_CONNECTIONS)
 			x, y = int(i.landmark[8].x*640), int(i.landmark[8].y*480)
 
-			if x < max_x and y < max_y and x > ml:
+            # Detectar clic en el icono
+			if x < icon_x + 50 and y < icon_y +50:
+				if time_init:
+					ctime = time.time()
+					time_init = False
+				ptime = time.time()
+
+				cv2.circle(frm, (x, y), rad, (0,255,255), 2)
+				rad -= 1
+
+				if (ptime - ctime) > 0.8:
+					curr_tool = "imagen"
+					print("Herramienta seleccionada: Añadir imagen")
+					time_init = True
+					rad = 40
+
+			elif x < max_x and y < max_y and x > ml:
 				if time_init:
 					ctime = time.time()
 					time_init = False
@@ -86,6 +131,21 @@ while True:
 					print("Estas usando: ", curr_tool)
 					time_init = True
 					rad = 40
+			
+			elif img_add and x < icon_x + 50 and y < icon_y +100 and y > icon_y +50:
+				if time_init:
+					ctime = time.time()
+					time_init = False
+				ptime = time.time()
+
+				cv2.circle(frm, (x, y), rad, (0,255,255), 2)
+				rad -= 1
+
+				if (ptime - ctime) > 0.8:
+					curr_tool = "seleccione herramienta"
+					print("Imagen Eliminada")
+					selected_img = None
+					img_add = False
 
 			else:
 				time_init = True
@@ -102,8 +162,6 @@ while True:
 				else:
 					prevx = x
 					prevy = y
-
-
 
 			elif curr_tool == "linea":
 				xi, yi = int(i.landmark[12].x*640), int(i.landmark[12].y*480)
@@ -160,14 +218,48 @@ while True:
 				if index_raised(yi, y9):
 					cv2.circle(frm, (x, y), 30, (0,0,0), -1)
 					cv2.circle(mask, (x, y), 30, 255, -1)
-
-
+			
+			elif curr_tool == "imagen" and selected_img is None:
+				root = tk.Tk()
+				root.withdraw()  # Oculta la ventana principal
+				img_path = filedialog.askopenfilename(initialdir="imagenes", title="Seleccionar Imagen", filetypes=(("Archivos de Imagen", "*.png;*.jpg;*.jpeg"),))
+				
+				if img_path:
+					selected_img = cv2.imread(img_path, cv2.IMREAD_UNCHANGED)
+					if selected_img is None:
+						print("Error: La imagen no se cargo correctamente")
+					else:
+						h, w, _ = selected_img.shape
+						ancho = int(w * img_scale)
+						alto = int(h * img_scale)
+						selected_img = cv2.resize(selected_img, (ancho, alto))
+						if selected_img.shape[-1] == 4:  # Verificar si tiene 4 canales (RGBA)
+							selected_img = cv2.cvtColor(selected_img, cv2.COLOR_BGRA2RGBA)
+							# Separar los canales de la imagen
+							bgr_icon_img = selected_img[:, :, :3]  # Canales RGB
+							alpha_channel_img = selected_img[:, :, 3] / 255.0  # Canal alfa normalizado a [0, 1]		
+						else:
+							roi_img = selected_img
+						img_add = True
 
 	op = cv2.bitwise_and(frm, frm, mask=mask)
 	frm[:, :, 1] = op[:, :, 1]
 	frm[:, :, 2] = op[:, :, 2]
 
 	frm[:max_y, ml:max_x] = cv2.addWeighted(tools, 0.7, frm[:max_y, ml:max_x], 0.3, 0)
+	
+	roi = frm[icon_y:icon_y+50, icon_x:icon_x+50]
+	# Mezclar usando el canal alfa
+	for c in range(3):  # Iterar sobre B, G, R
+		roi[:, :, c] = roi[:, :, c] * (1 - alpha_channel) + bgr_icon[:, :, c] * alpha_channel
+	frm[icon_y:icon_y+50, icon_x:icon_x+50] = roi
+
+	if img_add:
+		roi_img = frm[50:alto+50, 50:ancho+50]
+		for c in range(3):  # Iterar sobre B, G, R
+			roi_img[:, :, c] = roi_img[:, :, c] * (1 - alpha_channel_img) + bgr_icon_img[:, :, c] * alpha_channel_img
+		frm[50:alto+50, 50:ancho+50] = roi_img
+		frm[icon_y+50:icon_y+100, icon_x:icon_x+50] = icon_delete_img
 
 	cv2.putText(frm, curr_tool, (270+ml,30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0,0,255), 2)
 	cv2.imshow("paint app", frm)
@@ -176,4 +268,3 @@ while True:
 		cv2.destroyAllWindows()
 		cap.release()
 		break
- 
